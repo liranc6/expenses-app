@@ -1,0 +1,13 @@
+name: expenses-app
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - streamlit>=1.0
+      - pandas>=1.5
+      - plotly>=5.0
+      - gspread>=5.0
+      - google-auth>=2.0
+      - pytest>=9.0
