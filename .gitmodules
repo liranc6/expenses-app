@@ -1,0 +1,3 @@
+[submodule "Agent-Orchestration-Workspace"]
+	path = Agent-Orchestration-Workspace
+	url = git@github.com:liranc6/Agent-Orchestration-Workspace.git
