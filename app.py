@@ -20,6 +20,9 @@ from expenses_app.store import build_event_store, parse_amount, serialize_splits
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 DEFAULT_USERS = ["You", "Partner"]
+BUDGET_TARGETS = {
+    "Food": 20000,
+}
 
 
 def safe_string(value: Optional[str]) -> str:
@@ -101,6 +104,26 @@ def main() -> None:
     settlements = derive_settlements(events)
     balances = compute_balances(expenses, settlements)
 
+    search_query = safe_string(st.sidebar.text_input("Search notes", value=""))
+    filtered_expenses = (
+        {
+            expense_id: expense
+            for expense_id, expense in expenses.items()
+            if search_query.lower() in (expense.get("note", "") or "").lower()
+        }
+        if search_query
+        else expenses
+    )
+    budget_warnings = []
+    category_totals = {}
+    for expense in filtered_expenses.values():
+        category = expense.get("category", "Uncategorized") or "Uncategorized"
+        category_totals[category] = category_totals.get(category, 0) + expense["amount"]
+    for category, total in category_totals.items():
+        budget_target = BUDGET_TARGETS.get(category)
+        if budget_target is not None and total >= budget_target:
+            budget_warnings.append((category, total, budget_target))
+
     col1, col2 = st.columns([2, 1])
 
     with col1:
@@ -121,23 +144,26 @@ def main() -> None:
         else:
             st.info("No balances yet. Create your first expense or settlement.")
 
+        if budget_warnings:
+            for category, total, target in budget_warnings:
+                st.warning(
+                    f"Budget reached for {category}: {format_currency(total)} / {format_currency(target)}"
+                )
+
         st.subheader("Active expenses")
-        if expenses:
+        if filtered_expenses:
             active = [
                 {
                     "expense_id": expense_id,
                     "payer": expense["payer"],
                     "amount": format_currency(expense["amount"]),
                     "category": expense.get("category", "-"),
+                    "note": expense.get("note", ""),
                     "splits": ", ".join(f"{u}:{a/100:.2f}" for u, a in expense["splits"].items()),
                 }
-                for expense_id, expense in expenses.items()
+                for expense_id, expense in filtered_expenses.items()
             ]
             st.table(active)
-            category_totals = {}
-            for expense in expenses.values():
-                category = expense.get("category", "Uncategorized") or "Uncategorized"
-                category_totals[category] = category_totals.get(category, 0) + expense["amount"]
             category_fig = px.pie(
                 names=list(category_totals.keys()),
                 values=list(category_totals.values()),
@@ -145,7 +171,7 @@ def main() -> None:
             )
             st.plotly_chart(category_fig, use_container_width=True)
         else:
-            st.info("No active expenses. Add one in the form below.")
+            st.info("No matching expenses. Modify the search query or add new entries.")
 
         st.subheader("Settlements")
         if settlements:

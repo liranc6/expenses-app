@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+from decimal import Decimal, InvalidOperation
 from typing import Dict, List, Optional
 
 from expenses_app.model import Event
@@ -114,10 +115,10 @@ def parse_amount(value: str) -> int:
     if not normalized:
         raise ValueError("Amount is required")
     try:
-        parsed = float(normalized)
-    except ValueError as exc:
+        parsed = Decimal(normalized)
+    except InvalidOperation as exc:
         raise ValueError("Amount must be a decimal number") from exc
-    cents = int(round(parsed * 100))
+    cents = int((parsed * Decimal("100")).to_integral_value())
     if cents < 0:
         raise ValueError("Amount must be positive")
     return cents
