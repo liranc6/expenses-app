@@ -1,7 +1,9 @@
 import json
+import os
 from typing import Dict, List, Optional
 from uuid import uuid4
 
+from dotenv import load_dotenv
 import plotly.express as px
 import streamlit as st
 
@@ -14,6 +16,8 @@ from expenses_app.replay import (
 )
 from expenses_app.store import build_event_store, parse_amount, serialize_splits
 
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 DEFAULT_USERS = ["You", "Partner"]
 
@@ -82,6 +86,14 @@ def main() -> None:
     st.set_page_config(page_title="Expenses App", layout="wide")
     st.title("Expenses App — Event-Sourced Ledger")
     active_user = st.sidebar.selectbox("Logged in as", DEFAULT_USERS, index=0)
+    sheet_id = os.getenv("GOOGLE_SHEET_ID")
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    credentials_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+    sheet_mode = bool(sheet_id and (credentials_path or credentials_json))
+    storage_mode = "Google Sheets" if sheet_mode else "Local CSV"
+    st.sidebar.markdown(f"**Storage mode:** {storage_mode}")
+    if sheet_id and not (credentials_path or credentials_json):
+        st.sidebar.warning("GOOGLE_SHEET_ID is set but credentials are missing.")
 
     event_store = build_event_store()
     events = sort_events(event_store.load())

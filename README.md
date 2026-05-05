@@ -29,7 +29,7 @@ streamlit run app.py
 ## Storage
 
 - Default storage: `events.csv`
-- Optional Google Sheets storage via environment variables:
+- Optional Google Sheets storage via environment variables or `.env` file:
   - `GOOGLE_SHEET_ID`
   - `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_JSON`
 

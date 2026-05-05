@@ -4,5 +4,6 @@ __pycache__/
 .events.csv
 events.csv
 .env
+private/
 /.streamlit
 .history/

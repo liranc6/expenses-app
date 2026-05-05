@@ -5,6 +5,7 @@ dependencies:
   - python=3.10
   - pip
   - pip:
+      - python-dotenv>=1.0
       - streamlit>=1.0
       - pandas>=1.5
       - plotly>=5.0
