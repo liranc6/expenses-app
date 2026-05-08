@@ -1,0 +1,16 @@
+{
+    "Liran": {
+        "Food": 20000,
+        "Transport": 5000,
+        "Travel": 50000,
+        "Bill": 10000,
+        "Other": 5000
+    },
+    "Vova": {
+        "Food": 20000,
+        "Transport": 5000,
+        "Travel": 50000,
+        "Bill": 10000,
+        "Other": 5000
+    }
+}
