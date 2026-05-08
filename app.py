@@ -2,6 +2,7 @@ import json
 import os
 from typing import Dict, List, Optional
 from uuid import uuid4
+from decimal import Decimal
 
 from dotenv import load_dotenv
 import plotly.express as px
@@ -79,25 +80,11 @@ def format_currency(value: int) -> str:
     return f"{value / 100:.2f}"
 
 
-def show_expense_row(expense_id: str, expense: Dict[str, object]) -> str:
-    splits = expense.get("splits", {})
-    split_text = ", ".join(f"{k}:{v / 100:.2f}" for k, v in splits.items())
-    return f"{expense_id} | {expense['payer']} | {format_currency(expense['amount'])} | {expense.get('category','-')} | {split_text}"
-
-
 def main() -> None:
     st.set_page_config(page_title="Expenses App", layout="wide")
     st.title("Expenses App — Event-Sourced Ledger")
     active_user = st.sidebar.selectbox("Logged in as", DEFAULT_USERS, index=0)
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
-    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    credentials_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    sheet_mode = bool(sheet_id and (credentials_path or credentials_json))
-    storage_mode = "Google Sheets" if sheet_mode else "Local CSV"
-    st.sidebar.markdown(f"**Storage mode:** {storage_mode}")
-    if sheet_id and not (credentials_path or credentials_json):
-        st.sidebar.warning("GOOGLE_SHEET_ID is set but credentials are missing.")
-
+    
     event_store = build_event_store()
     events = sort_events(event_store.load())
     expenses = derive_expense_state(events)
@@ -114,239 +101,153 @@ def main() -> None:
         if search_query
         else expenses
     )
-    budget_warnings = []
+    
     category_totals = {}
     for expense in filtered_expenses.values():
         category = expense.get("category", "Uncategorized") or "Uncategorized"
         category_totals[category] = category_totals.get(category, 0) + expense["amount"]
-    for category, total in category_totals.items():
-        budget_target = BUDGET_TARGETS.get(category)
-        if budget_target is not None and total >= budget_target:
-            budget_warnings.append((category, total, budget_target))
 
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("Current balances")
-        if balances:
-            balance_rows = [
-                {"user": user, "balance": format_currency(amount)}
-                for user, amount in sorted(balances.items(), key=lambda item: -item[1])
-            ]
-            st.table(balance_rows)
-            fig = px.bar(
-                x=[row["user"] for row in balance_rows],
-                y=[float(row["balance"]) for row in balance_rows],
-                labels={"x": "User", "y": "Balance"},
-                title="Net Balances",
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No balances yet. Create your first expense or settlement.")
-
-        if budget_warnings:
-            for category, total, target in budget_warnings:
-                st.warning(
-                    f"Budget reached for {category}: {format_currency(total)} / {format_currency(target)}"
-                )
-
-        st.subheader("Active expenses")
-        if filtered_expenses:
-            active = [
-                {
-                    "expense_id": expense_id,
-                    "payer": expense["payer"],
-                    "amount": format_currency(expense["amount"]),
-                    "category": expense.get("category", "-"),
-                    "note": expense.get("note", ""),
-                    "splits": ", ".join(f"{u}:{a/100:.2f}" for u, a in expense["splits"].items()),
-                }
-                for expense_id, expense in filtered_expenses.items()
-            ]
-            st.table(active)
-            category_fig = px.pie(
-                names=list(category_totals.keys()),
-                values=list(category_totals.values()),
-                title="Expense Category Breakdown",
-            )
-            st.plotly_chart(category_fig, use_container_width=True)
-        else:
-            st.info("No matching expenses. Modify the search query or add new entries.")
-
-        st.subheader("Settlements")
-        if settlements:
-            st.table(
-                [
-                    {
-                        "from": item["from"],
-                        "to": item["to"],
-                        "amount": format_currency(item["amount"]),
-                    }
-                    for item in settlements
-                ]
-            )
-        else:
-            st.info("No settlements recorded yet.")
-
-    with col2:
-        st.subheader("Event log")
-        st.write(f"Total events: {len(events)}")
-        if events:
-            st.dataframe(
-                [
-                    {
-                        "timestamp_ns": event.timestamp_ns,
-                        "type": event.type,
-                        "request_id": event.request_id,
-                        "event_id": event.event_id,
-                        "payload": json.dumps(event.payload, sort_keys=True),
-                    }
-                    for event in events
-                ],
-                use_container_width=True,
-            )
+    # Layout: Balances first
+    st.subheader("Current balances")
+    if balances:
+        balance_rows = [
+            {"user": user, "balance": format_currency(amount)}
+            for user, amount in sorted(balances.items(), key=lambda item: -item[1])
+        ]
+        st.table(balance_rows)
+    else:
+        st.info("No balances yet.")
 
     st.markdown("---")
     st.header("Write events")
-
-    with st.expander("Create a new expense"):
-        with st.form("create_expense"):
-            payer = st.selectbox("Payer", options=DEFAULT_USERS, index=DEFAULT_USERS.index(active_user))
-            note = safe_string(st.text_input("Note / description", value=""))
-            amount = safe_string(st.text_input("Total amount (decimal)", value=""))
-            category = safe_string(st.text_input("Category", value=""))
-            split_text = safe_string(
-                st.text_input(
-                    "Splits (format: user1:amount1,user2:amount2)",
-                    value="",
-                )
-            )
-            submit = st.form_submit_button("Create expense")
-            if submit:
+    
+    with st.expander("Create a new expense", expanded=True):
+        # UI Order change: Amount above Note
+        amount_input = st.text_input("Total amount (decimal)", value="", key="amount_input")
+        note_input = st.text_input("Note / description", value="", key="note_input")
+        
+        # Immediate auto-categorization UX
+        auto_category = classify_category(note_input)
+        category_input = st.text_input("Category", value=auto_category, key="category_input")
+        
+        payer = st.selectbox("Payer", options=DEFAULT_USERS, index=DEFAULT_USERS.index(active_user))
+        
+        # Splitwise-style splits
+        st.write("Splits")
+        split_mode = st.radio("Method", ["Equal", "By percentage", "By amount"], horizontal=True, label_visibility="collapsed")
+        
+        splits = {}
+        amount_cents = 0
+        try:
+            if amount_input:
+                amount_cents = parse_amount(amount_input)
+        except:
+            pass
+            
+        if split_mode == "Equal":
+            if amount_cents > 0:
+                splits = default_equal_splits(amount_cents, DEFAULT_USERS, payer)
+                for user, val in splits.items():
+                    st.text(f"{user}: {format_currency(val)}")
+        
+        elif split_mode == "By percentage":
+            cols = st.columns(len(DEFAULT_USERS))
+            total_pct = 0
+            # Splitwise UX: calculate the other user automatically
+            if len(DEFAULT_USERS) == 2:
+                user1 = DEFAULT_USERS[0]
+                user2 = DEFAULT_USERS[1]
+                p1 = cols[0].number_input(f"{user1} %", min_value=0, max_value=100, value=50, key="p1")
+                p2 = 100 - p1
+                cols[1].text_input(f"{user2} %", value=str(p2), disabled=True)
+                splits[user1] = int(amount_cents * p1 / 100)
+                splits[user2] = amount_cents - splits[user1]
+            else:
+                for i, user in enumerate(DEFAULT_USERS):
+                    pct = cols[i].number_input(f"{user} %", min_value=0, max_value=100, value=0, key=f"pct_{user}")
+                    total_pct += pct
+                    splits[user] = int(amount_cents * pct / 100)
+        
+        elif split_mode == "By amount":
+            cols = st.columns(len(DEFAULT_USERS))
+            if len(DEFAULT_USERS) == 2:
+                user1 = DEFAULT_USERS[0]
+                user2 = DEFAULT_USERS[1]
+                a1_str = cols[0].text_input(f"{user1} amount", value="", key="a1")
                 try:
-                    amount_cents = parse_amount(amount)
-                    splits = parse_splits_text(split_text)
-                    if not splits:
-                        splits = default_equal_splits(amount_cents, DEFAULT_USERS, payer)
-                    if sum(splits.values()) != amount_cents:
-                        raise ValueError("Split totals must equal the expense amount.")
-                    if payer not in splits:
-                        raise ValueError("The payer must appear in the split definition.")
-                    if not category:
-                        category = classify_category(note)
-                    event = Event.new(
-                        type="EXPENSE_CREATED",
-                        payload={
-                            "expense_id": uuid4().hex,
-                            "amount": amount_cents,
-                            "payer": payer,
-                            "splits": splits,
-                            "category": category,
-                            "note": note,
-                        },
-                    )
-                    event_store.append(event)
-                    st.success("Expense event appended successfully. Refresh the page to see updates.")
-                except Exception as exc:
-                    st.error(str(exc))
-
-    with st.expander("Edit an active expense"):
-        if expenses:
-            with st.form("edit_expense"):
-                selected_expense_id = st.selectbox(
-                    "Select expense to edit", sorted(expenses)
-                )
-                selected_expense = expenses[selected_expense_id]
-                payer = st.selectbox("Payer", options=DEFAULT_USERS, index=DEFAULT_USERS.index(selected_expense["payer"]))
-                amount = safe_string(
-                    st.text_input(
-                        "Total amount (decimal)",
-                        value=format_currency(selected_expense["amount"]),
-                    )
-                )
-                category = safe_string(
-                    st.text_input("Category", value=selected_expense.get("category", ""))
-                )
-                current_split = split_input_to_text(selected_expense["splits"])
-                split_text = safe_string(
-                    st.text_input("Splits (format: user1:amount1,user2:amount2)", value=current_split)
-                )
-                submit = st.form_submit_button("Edit expense")
-                if submit:
+                    a1 = parse_amount(a1_str) if a1_str else 0
+                    splits[user1] = a1
+                    a2 = amount_cents - a1
+                    cols[1].text_input(f"{user2} amount", value=format_currency(a2), disabled=True)
+                    splits[user2] = a2
+                except:
+                    splits[user1] = 0
+                    splits[user2] = 0
+            else:
+                for i, user in enumerate(DEFAULT_USERS):
+                    amt_str = cols[i].text_input(f"{user} amount", value="", key=f"amt_{user}")
                     try:
-                        amount_cents = parse_amount(amount)
-                        splits = parse_splits_text(split_text)
-                        if sum(splits.values()) != amount_cents:
-                            raise ValueError("Split totals must equal the expense amount.")
-                        if payer not in splits:
-                            raise ValueError("The payer must appear in the split definition.")
-                        event = Event.new(
-                            type="EXPENSE_EDITED",
-                            payload={
-                                "expense_id": selected_expense_id,
-                                "amount": amount_cents,
-                                "payer": payer,
-                                "splits": splits,
-                                "category": category,
-                            },
-                        )
-                        event_store.append(event)
-                        st.success("Expense edit event appended successfully. Refresh to see updates.")
-                    except Exception as exc:
-                        st.error(str(exc))
-        else:
-            st.info("No active expenses available to edit.")
+                        splits[user] = parse_amount(amt_str) if amt_str else 0
+                    except:
+                        splits[user] = 0
 
-    with st.expander("Delete an active expense"):
-        if expenses:
-            with st.form("delete_expense"):
-                selected_expense_id = st.selectbox(
-                    "Select expense to delete", sorted(expenses)
+        if st.button("Create expense"):
+            try:
+                if not amount_input: raise ValueError("Amount is required")
+                if sum(splits.values()) != amount_cents: raise ValueError("Split totals must equal amount")
+                
+                event = Event.new(
+                    type="EXPENSE_CREATED",
+                    payload={
+                        "expense_id": uuid4().hex,
+                        "amount": amount_cents,
+                        "payer": payer,
+                        "splits": splits,
+                        "category": category_input or auto_category,
+                        "note": note_input,
+                    },
                 )
-                submit = st.form_submit_button("Delete expense")
-                if submit:
-                    event = Event.new(
-                        type="EXPENSE_DELETED",
-                        payload={"expense_id": selected_expense_id},
-                    )
-                    event_store.append(event)
-                    st.success("Delete event appended successfully. Refresh to see updates.")
-        else:
-            st.info("No active expense to delete.")
-
-    with st.expander("Create a settlement"):
-        with st.form("create_settlement"):
-            payer = st.selectbox("From", options=DEFAULT_USERS, index=DEFAULT_USERS.index(active_user))
-            payee = st.selectbox(
-                "To",
-                options=[user for user in DEFAULT_USERS if user != payer],
-                index=0,
-            )
-            amount = safe_string(st.text_input("Settlement amount (decimal)", value=""))
-            submit = st.form_submit_button("Record settlement")
-            if submit:
-                try:
-                    amount_cents = parse_amount(amount)
-                    if not payer or not payee:
-                        raise ValueError("Both from and to users are required.")
-                    if payer == payee:
-                        raise ValueError("Settlement sender and recipient must differ.")
-                    event = Event.new(
-                        type="SETTLEMENT_CREATED",
-                        payload={
-                            "from": payer,
-                            "to": payee,
-                            "amount": amount_cents,
-                        },
-                    )
-                    event_store.append(event)
-                    st.success("Settlement event appended successfully. Refresh to see updates.")
-                except Exception as exc:
-                    st.error(str(exc))
+                event_store.append(event)
+                st.success("Expense created!")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
 
     st.markdown("---")
-    st.caption("This application stores events in an append-only ledger and derives state by deterministic replay.")
+    
+    # Remove Expense ID (hash) from table
+    st.subheader("Active expenses")
+    if filtered_expenses:
+        active_display = [
+            {
+                "Payer": expense["payer"],
+                "Amount": format_currency(expense["amount"]),
+                "Category": expense.get("category", "-"),
+                "Note": expense.get("note", ""),
+                "Splits": ", ".join(f"{u}:{a/100:.2f}" for u, a in expense["splits"].items()),
+            }
+            for expense in filtered_expenses.values()
+        ]
+        st.table(active_display)
+    else:
+        st.info("No matching expenses.")
 
+    with st.expander("More Controls (Edit/Delete/Settlement)"):
+        tabs = st.tabs(["Edit", "Delete", "Settlement"])
+        with tabs[1]:
+            if expenses:
+                del_id = st.selectbox("Select to delete", sorted(expenses))
+                if st.button("Delete"):
+                    event_store.append(Event.new(type="EXPENSE_DELETED", payload={"expense_id": del_id}))
+                    st.rerun()
+        with tabs[2]:
+            with st.form("settle"):
+                f_u = st.selectbox("From", DEFAULT_USERS)
+                t_u = st.selectbox("To", [u for u in DEFAULT_USERS if u != f_u])
+                s_a = st.text_input("Amount")
+                if st.form_submit_button("Settle"):
+                    event_store.append(Event.new(type="SETTLEMENT_CREATED", payload={"from": f_u, "to": t_u, "amount": parse_amount(s_a)}))
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
