@@ -2,9 +2,14 @@ import csv
 import json
 import os
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from expenses_app.model import Event
+
+try:
+    import streamlit as st
+except ImportError:
+    st = None  # type: ignore[assignment]
 
 
 gsheet_support = False
@@ -52,7 +57,12 @@ class LocalEventStore:
 class GoogleSheetsEventStore:
     HEADER = ["event_id", "request_id", "timestamp_ns", "type", "payload_json"]
 
-    def __init__(self, sheet_id: str, credentials_path: Optional[str] = None, credentials_json: Optional[str] = None):
+    def __init__(
+        self,
+        sheet_id: str,
+        credentials_path: Optional[str] = None,
+        credentials_json: Optional[Union[str, Dict[str, Any]]] = None,
+    ):
         if not gsheet_support:
             raise RuntimeError("Google Sheets support is not available. Install gspread and google-auth.")
         self.sheet_id = sheet_id
@@ -72,10 +82,25 @@ class GoogleSheetsEventStore:
     def _build_client(self):
         if self.credentials_path:
             return gspread.service_account(filename=self.credentials_path)
-        credentials_data = json.loads(self.credentials_json) if self.credentials_json else None
+
+        credentials_data = None
+        if isinstance(self.credentials_json, dict):
+            # If passed directly from Streamlit secrets
+            credentials_data = self.credentials_json
+        elif isinstance(self.credentials_json, str):
+            credentials_data = json.loads(self.credentials_json)
+
         if credentials_data:
-            creds = Credentials.from_service_account_info(credentials_data)
+            creds = Credentials.from_service_account_info(
+                credentials_data,
+                scopes=[
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive",
+                ],
+            )
+            # Use gspread.auth.authorize instead of gspread.authorize for better compatibility
             return gspread.authorize(creds)
+            
         raise ValueError("Google Sheets credentials are required via path or JSON string")
 
     def _ensure_header(self) -> None:
@@ -132,10 +157,25 @@ def build_event_store() -> LocalEventStore:
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     credentials_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if sheet_id and (credentials_path or credentials_json):
+    secret_credentials = None
+
+    if st is not None:
+        try:
+            if "gcp_service_account" in st.secrets:
+                secret_credentials = dict(st.secrets["gcp_service_account"])
+            if "GOOGLE_SHEET_ID" in st.secrets:
+                sheet_id = sheet_id or st.secrets["GOOGLE_SHEET_ID"]
+        except Exception as e:
+            print(f"DEBUG: Error reading st.secrets: {e}")
+
+    if sheet_id and (credentials_path or credentials_json or secret_credentials):
         return GoogleSheetsEventStore(
             sheet_id=sheet_id,
             credentials_path=credentials_path,
-            credentials_json=credentials_json,
+            credentials_json=credentials_json or secret_credentials,
         )
+
+    if sheet_id:
+        print("DEBUG: GOOGLE_SHEET_ID is set but credentials are missing.")
+
     return LocalEventStore()
