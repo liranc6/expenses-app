@@ -1,0 +1,3 @@
+([('ExpensesApp',
+   '/Users/liranc6/Desktop/play_with_code/expenses-app/dist/ExpensesApp',
+   'EXECUTABLE')],)
