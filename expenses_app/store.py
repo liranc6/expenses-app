@@ -2,14 +2,9 @@ import csv
 import json
 import os
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional
 
 from expenses_app.model import Event
-
-try:
-    import streamlit as st
-except ImportError:
-    st = None  # type: ignore[assignment]
 
 
 gsheet_support = False
@@ -133,29 +128,14 @@ def serialize_splits(splits: Dict[str, int]) -> str:
     return json.dumps(splits, sort_keys=True)
 
 
-def build_event_store() -> Union[LocalEventStore, GoogleSheetsEventStore]:
+def build_event_store() -> LocalEventStore:
     sheet_id = os.getenv("GOOGLE_SHEET_ID")
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     credentials_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    secret_credentials = None
-
-    if st is not None:
-        try:
-            # Check Streamlit secrets first
-            secret_credentials = st.secrets.get("gcp_service_account")
-            sheet_id = sheet_id or st.secrets.get("GOOGLE_SHEET_ID")
-        except Exception:
-            secret_credentials = None
-
-    # Priority: Streamlit Secret -> Local Env JSON -> Local Credentials Path
-    if sheet_id and (secret_credentials or credentials_json or credentials_path):
+    if sheet_id and (credentials_path or credentials_json):
         return GoogleSheetsEventStore(
             sheet_id=sheet_id,
-            credentials_path=credentials_path if not (secret_credentials or credentials_json) else None,
-            credentials_json=secret_credentials or credentials_json,
+            credentials_path=credentials_path,
+            credentials_json=credentials_json,
         )
-
-    if sheet_id:
-        st.warning("GOOGLE_SHEET_ID is set but credentials (gcp_service_account) are missing in Streamlit Secrets.")
-
     return LocalEventStore()
