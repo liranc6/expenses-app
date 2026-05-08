@@ -194,10 +194,12 @@ def main() -> None:
             user_limits = budget_targets.get(display_user, {})
             for cat, limit in user_limits.items():
                 if limit <= 0: continue
-                consumed = 0
-                for exp in expenses.values():
-                    if exp.get("category") == cat:
-                        consumed += exp["splits"].get(user, 0)
+                # Check both the display name and the event user key
+                consumed = sum(
+                    exp["splits"].get(display_user, 0) or exp["splits"].get(user, 0)
+                    for exp in expenses.values()
+                    if exp.get("category") == cat
+                )
                 
                 if consumed >= limit * 0.85:
                     scat = f"{CATEGORIES.get(cat, '')} {cat}"
@@ -257,14 +259,21 @@ def main() -> None:
     # --- BUDGET UTILIZATION SECTION (Active User Only) ---
     st.markdown("---")
     st.subheader(f"📊 Your Budget Utilization ({active_user})")
+    
+    # Mapping for backward compatibility in spending calculation
+    internal_user_key = active_user
+    if active_user == "Liran": internal_user_key = "You"
+    if active_user == "Vova": internal_user_key = "Partner"
+
     user_limits = budget_targets.get(active_user, {})
     if any(limit > 0 for limit in user_limits.values()):
         cols = st.columns(len(CATEGORIES))
         for i, (cat, emoji) in enumerate(CATEGORIES.items()):
             limit = user_limits.get(cat, 0)
             if limit > 0:
+                # Check both the display name and the internal key
                 consumed = sum(
-                    exp["splits"].get(active_user, 0)
+                    exp["splits"].get(active_user, 0) or exp["splits"].get(internal_user_key, 0)
                     for exp in expenses.values()
                     if exp.get("category") == cat
                 )
