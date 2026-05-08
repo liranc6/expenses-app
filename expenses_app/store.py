@@ -2,9 +2,14 @@ import csv
 import json
 import os
 from decimal import Decimal, InvalidOperation
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union, Any
 
 from expenses_app.model import Event
+
+try:
+    import streamlit as st
+except ImportError:
+    st = None  # type: ignore[assignment]
 
 
 gsheet_support = False
