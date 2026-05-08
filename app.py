@@ -254,6 +254,35 @@ def main() -> None:
             )
             st.plotly_chart(fig_payer, use_container_width=True)
 
+    # --- BUDGET UTILIZATION SECTION (Active User Only) ---
+    st.markdown("---")
+    st.subheader(f"📊 Your Budget Utilization ({active_user})")
+    user_limits = budget_targets.get(active_user, {})
+    if any(limit > 0 for limit in user_limits.values()):
+        cols = st.columns(len(CATEGORIES))
+        for i, (cat, emoji) in enumerate(CATEGORIES.items()):
+            limit = user_limits.get(cat, 0)
+            if limit > 0:
+                consumed = sum(
+                    exp["splits"].get(active_user, 0)
+                    for exp in expenses.values()
+                    if exp.get("category") == cat
+                )
+                percent = min(consumed / limit, 1.0)
+                
+                with cols[i]:
+                    st.write(f"{emoji} **{cat}**")
+                    st.progress(percent)
+                    color = "normal"
+                    if percent >= 1.0:
+                        st.error(f"{format_currency(consumed)} / {format_currency(limit)}")
+                    elif percent >= 0.85:
+                        st.warning(f"{format_currency(consumed)} / {format_currency(limit)}")
+                    else:
+                        st.info(f"{format_currency(consumed)} / {format_currency(limit)}")
+    else:
+        st.info("No limits set for your account. Go to 'Limits Configuration' to set them.")
+
     st.markdown("---")
     st.header("Write events")
     
