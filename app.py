@@ -89,10 +89,14 @@ def main():
     st.write("### 🚀 Welcome to the Modernized Expenses App")
     st.write("Select a page below or from the sidebar to begin:")
     
-    st.page_link("pages/1_Dashboard.py", label="1 Dashboard", icon="📊")
-    st.page_link("pages/2_Expenses.py", label="2 Expenses", icon="💸")
-    st.page_link("pages/3_Limits.py", label="3 Limits", icon="🛑")
-    st.page_link("pages/4_Settlements.py", label="4 Settlements", icon="🤝")
 
 if __name__ == "__main__":
     main()
+    st.markdown('- **1 Dashboard**: Visual summary and budget tracking.')
+    st.markdown('- **2 Expenses**: Full history and search.')
+    st.markdown('- **3 Limits**: Configure your budgets.')
+    st.markdown('- **4 Settlements**: Balance your accounts.')
+    st.markdown('- **1 Dashboard**: Visual summary and budget tracking.')
+    st.markdown('- **2 Expenses**: Full history and search.')
+    st.markdown('- **3 Limits**: Configure your budgets.')
+    st.markdown('- **4 Settlements**: Balance your accounts.')
