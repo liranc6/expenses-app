@@ -72,7 +72,7 @@ def render_sidebar():
     
     # Custom Sidebar Buttons as requested
     if st.sidebar.button("📊 Dashboard", use_container_width=True):
-        st.switch_page("pages/1_Dashboard.py")
+        st.switch_page("app.py")
     if st.sidebar.button("📜 Expenses", use_container_width=True):
         st.switch_page("pages/2_Expenses.py")
     if st.sidebar.button("⚙️ Limits", use_container_width=True):
@@ -129,12 +129,13 @@ def add_expense_dialog():
 
 def render_fab():
     # Visually styled FAB with a hidden Streamlit button to trigger the dialog
+    # We use a custom attribute data-testid or aria-label to target it
     st.markdown("""
         <div class="fab-container">
-            <button class="fab-button" onclick="document.querySelector('button[kind=\'secondary\'][aria-label=\'fab-trigger\']').click()">+</button>
+            <button class="fab-button" onclick="const btn = Array.from(parent.document.querySelectorAll('button')).find(el => el.innerText === '+'); if(btn) btn.click();">+</button>
         </div>
     """, unsafe_allow_html=True)
     
-    # Hidden Streamlit button that triggers the dialog
-    if st.button("+", key="fab_trigger", help="Add New Expense", label_visibility="collapsed"):
+    # This button is hidden by the empty label + collapsed visibility but physically exists for the JS to click
+    if st.button("+", key="fab_trigger", help="Add New Expense"):
         add_expense_dialog()
