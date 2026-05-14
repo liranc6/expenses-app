@@ -68,22 +68,31 @@ def main():
             background-color: #28a745 !important;
             border-color: #28a745 !important;
             color: white !important;
+            position: fixed !important;
+            bottom: 30px !important;
+            right: 30px !important;
+            z-index: 99999 !important;
+            border-radius: 50px !important;
+            width: auto !important;
+            padding: 10px 20px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
     st.sidebar.title("💰 Expenses App")
-    st.sidebar.info("Welcome! Use the sidebar to navigate or the ➕ button to add expenses.")
+    st.sidebar.info("Welcome! Use the navigation menu to switch pages.")
     
-    if st.sidebar.button("➕ Quick Add", use_container_width=True):
+    if st.button("➕ Quick Add", type="primary", use_container_width=False):
         show_add_expense_modal()
 
     st.write("### 🚀 Welcome to the Modernized Expenses App")
-    st.write("Select a page from the sidebar to begin:")
-    st.markdown("- **1 Dashboard**: Visual summary and budget tracking.")
-    st.markdown("- **2 Expenses**: Full history and search.")
-    st.markdown("- **3 Limits**: Configure your budgets.")
-    st.markdown("- **4 Settlements**: Balance your accounts.")
+    st.write("Select a page below or from the sidebar to begin:")
+    
+    st.page_link("pages/1_Dashboard.py", label="1 Dashboard", icon="📊")
+    st.page_link("pages/2_Expenses.py", label="2 Expenses", icon="💸")
+    st.page_link("pages/3_Limits.py", label="3 Limits", icon="🛑")
+    st.page_link("pages/4_Settlements.py", label="4 Settlements", icon="🤝")
 
 if __name__ == "__main__":
     main()
