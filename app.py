@@ -31,7 +31,6 @@ def default_equal_splits(amount_cents: int, users: list, payer: str) -> dict:
     return splits
 
 PAGES = [
-    {"label": "Home", "path": None, "func": None, "module": None},
     {"label": "Dashboard", "path": Path(__file__).parent / "pages" / "1_Dashboard.py", "func": "render_dashboard", "module": "page_dashboard"},
     {"label": "Expenses", "path": Path(__file__).parent / "pages" / "2_Expenses.py", "func": "render_expenses", "module": "page_expenses"},
     {"label": "Limits", "path": Path(__file__).parent / "pages" / "3_Limits.py", "func": "render_limits", "module": "page_limits"},
@@ -48,22 +47,91 @@ def load_page_module(page):
 def show_add_expense_modal():
     amount_input = st.text_input("Amount (e.g. 15.50)")
     note_input = st.text_input("Note", placeholder="Lunch, Taxi, etc.")
-    
+
     col1, col2 = st.columns(2)
     with col1:
         cat = st.selectbox("Category", list(CATEGORIES.keys()), index=0)
     with col2:
         payer = st.selectbox("Payer", DEFAULT_USERS, index=0)
-    
+
+    split_mode = st.radio("Split mode", ["Equal", "By percentage", "By amount"])
+    amount_cents = 0
+    try:
+        amount_cents = parse_amount(amount_input) if amount_input else 0
+    except Exception:
+        amount_cents = 0
+
+    splits = {}
+    validation_error = None
+
+    if split_mode == "Equal":
+        if amount_cents > 0:
+            splits = default_equal_splits(amount_cents, DEFAULT_USERS, payer)
+        st.write("**Equal split**")
+        for user, value in splits.items():
+            st.write(f"- {user}: ${value / 100:.2f}")
+
+    elif split_mode == "By percentage":
+        cols = st.columns(len(DEFAULT_USERS))
+        total_percent = 0
+        for i, user in enumerate(DEFAULT_USERS):
+            percent = cols[i].number_input(f"{user} %", min_value=0, max_value=100, value=0, key=f"split_pct_{i}")
+            total_percent += percent
+            splits[user] = int(amount_cents * percent / 100)
+
+        if amount_cents > 0 and total_percent != 100:
+            validation_error = "Percentages must total 100%."
+        st.write("**Split preview**")
+        for user, value in splits.items():
+            st.write(f"- {user}: ${value / 100:.2f}")
+
+    else:
+        cols = st.columns(len(DEFAULT_USERS))
+        if len(DEFAULT_USERS) == 2:
+            first_user = DEFAULT_USERS[0]
+            second_user = DEFAULT_USERS[1]
+            first_amount = cols[0].text_input(f"{first_user} amount", value="", key="split_amt_0")
+            try:
+                first_cents = parse_amount(first_amount) if first_amount else 0
+            except Exception:
+                first_cents = 0
+            second_cents = max(amount_cents - first_cents, 0)
+            cols[1].text_input(f"{second_user} amount", value=f"{second_cents / 100:.2f}", disabled=True)
+            splits = {first_user: first_cents, second_user: second_cents}
+            if amount_cents > 0 and sum(splits.values()) != amount_cents:
+                validation_error = "Split amounts must total the full expense amount."
+        else:
+            for i, user in enumerate(DEFAULT_USERS):
+                user_amount = cols[i].text_input(f"{user} amount", value="", key=f"split_amt_{i}")
+                try:
+                    splits[user] = parse_amount(user_amount) if user_amount else 0
+                except Exception:
+                    splits[user] = 0
+            if amount_cents > 0 and sum(splits.values()) != amount_cents:
+                validation_error = "Split amounts must total the full expense amount."
+
+        if splits:
+            st.write("**Split preview**")
+            for user, value in splits.items():
+                st.write(f"- {user}: ${value / 100:.2f}")
+
+    if validation_error:
+        st.error(validation_error)
+
     if st.button("Save Expense", type="primary", use_container_width=True):
         try:
-            amt = parse_amount(amount_input)
-            splits = default_equal_splits(amt, DEFAULT_USERS, payer)
+            if amount_cents <= 0:
+                raise ValueError("Amount must be positive")
+            if not note_input.strip():
+                raise ValueError("Note is required")
+            if sum(splits.values()) != amount_cents:
+                raise ValueError("Split totals must equal the total amount")
+
             event = Event.new(
                 type="EXPENSE_CREATED",
                 payload={
                     "expense_id": uuid4().hex,
-                    "amount": amt,
+                    "amount": amount_cents,
                     "payer": payer,
                     "splits": splits,
                     "category": cat,
@@ -98,31 +166,29 @@ def main():
     """, unsafe_allow_html=True)
 
     st.sidebar.title("💰 Expenses App")
-    page_labels = [page["label"] for page in PAGES]
-    selected_page = st.sidebar.radio("Navigation", page_labels, index=0)
-    st.sidebar.info("Choose a page below or use the quick add button.")
+    st.sidebar.info("Use these buttons to switch pages.")
 
-    if st.sidebar.button("➕ Quick Add", type="primary", use_container_width=False):
+    if "selected_page" not in st.session_state:
+        st.session_state.selected_page = "Dashboard"
+
+    for page in PAGES:
+        button_type = "primary" if st.session_state.selected_page == page["label"] else "secondary"
+        if st.sidebar.button(page["label"], key=f"nav_{page['label']}", type=button_type, use_container_width=True):
+            st.session_state.selected_page = page["label"]
+            st.experimental_rerun()
+
+    st.sidebar.markdown("---")
+    if st.sidebar.button("➕ Quick Add", type="primary", use_container_width=True):
         show_add_expense_modal()
 
-    if selected_page != "Home":
-        page = next(page for page in PAGES if page["label"] == selected_page)
-        module = load_page_module(page)
-        render_fn = getattr(module, page["func"], None)
-        if callable(render_fn):
-            render_fn()
-        else:
-            st.error("Unable to load the selected page.")
-        return
-
-    st.write("### 🚀 Welcome to the Modernized Expenses App")
-    st.write("Select a page from the sidebar to begin:")
-    st.info("Use the navigation menu on the left to switch between Dashboard, Expenses, Limits, and Settlements.")
-
-    st.markdown("- **1 Dashboard**: Visual summary and budget tracking.")
-    st.markdown("- **2 Expenses**: Full history and search.")
-    st.markdown("- **3 Limits**: Configure your budgets.")
-    st.markdown("- **4 Settlements**: Balance your accounts.")
+    selected_page = st.session_state.selected_page
+    page = next(page for page in PAGES if page["label"] == selected_page)
+    module = load_page_module(page)
+    render_fn = getattr(module, page["func"], None)
+    if callable(render_fn):
+        render_fn()
+    else:
+        st.error("Unable to load the selected page.")
 
 if __name__ == "__main__":
     main()
