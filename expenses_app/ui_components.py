@@ -84,58 +84,148 @@ def render_sidebar():
     active_user = st.sidebar.selectbox("Logged in as", DEFAULT_USERS, index=0)
     return active_user
 
-@st.dialog("➕ Add New Expense")
-def add_expense_dialog():
-    from expenses_app.store import build_event_store, parse_amount
-    from expenses_app.model import Event
-    from uuid import uuid4
-    
-    # Logic from create_expense section in app.py
-    col1, col2 = st.columns(2)
-    amount_input = col1.text_input("Total amount", key="dlg_amount")
-    note_input = col2.text_input("Note", key="dlg_note")
-    
-    cat = st.selectbox("Category", list(CATEGORIES.keys()), format_func=lambda x: f"{CATEGORIES[x]} {x}")
-    payer = st.selectbox("Payer", DEFAULT_USERS)
-    
-    st.write("**Splits** (Equal)")
-    # For simplicity in dialog, default to equal splits for now as basic functionality
-    if st.button("Create Expense", type="primary", use_container_width=True):
+def ensure_add_expense_state():
+    if "show_add_expense_modal" not in st.session_state:
+        st.session_state.show_add_expense_modal = False
+
+
+def open_add_expense_modal():
+    st.session_state.show_add_expense_modal = True
+
+
+def close_add_expense_modal():
+    st.session_state.show_add_expense_modal = False
+
+
+def render_add_expense_section():
+    if not st.session_state.show_add_expense_modal:
+        return
+
+    st.markdown("### ➕ Add Expense")
+    with st.form("add_expense_form"):
+        col1, col2 = st.columns(2)
+        amount_input = col1.text_input("Total amount (e.g. 15.50)", key="dlg_amount")
+        note_input = col2.text_input("Note", key="dlg_note")
+
+        cat = st.selectbox("Category", list(CATEGORIES.keys()), format_func=lambda x: f"{CATEGORIES[x]} {x}", key="dlg_cat")
+        payer = st.selectbox("Payer", DEFAULT_USERS, key="dlg_payer")
+
+        st.markdown("---")
+        st.write("**Splits**")
+        split_mode = st.radio("Method", ["Equal", "By percentage", "By amount"], horizontal=True, key="dlg_split_mode")
+
+        splits = {}
+        amount_cents = 0
         try:
-            amount_cents = parse_amount(amount_input)
-            # Simple equal split logic
-            from expenses_app.replay import default_equal_splits
-            splits = {u: amount_cents // len(DEFAULT_USERS) for u in DEFAULT_USERS}
-            # Handle remainder
-            remainder = amount_cents - sum(splits.values())
-            splits[payer] += remainder
-            
-            event = Event.new(
-                type="EXPENSE_CREATED",
-                payload={
-                    "expense_id": uuid4().hex,
-                    "amount": amount_cents,
-                    "payer": payer,
-                    "splits": splits,
-                    "category": cat,
-                    "note": note_input,
-                },
-            )
-            build_event_store().append(event)
-            st.success("Expense created!")
-            st.rerun()
-        except Exception as e:
-            st.error(str(e))
+            if amount_input:
+                from expenses_app.store import parse_amount
+                amount_cents = parse_amount(amount_input)
+        except Exception:
+            amount_cents = 0
+
+        if split_mode == "Equal":
+            if amount_cents > 0:
+                from expenses_app.replay import default_equal_splits
+                splits = default_equal_splits(amount_cents, DEFAULT_USERS, payer)
+                st.caption(f"Equal splits: {amount_cents/100/len(DEFAULT_USERS):.2f} each")
+
+        elif split_mode == "By percentage":
+            cols = st.columns(len(DEFAULT_USERS))
+            if len(DEFAULT_USERS) == 2:
+                user1, user2 = DEFAULT_USERS[0], DEFAULT_USERS[1]
+                p1 = cols[0].number_input(f"{user1} %", min_value=0, max_value=100, value=50, key="dlg_p1")
+                p2 = 100 - p1
+                cols[1].text_input(f"{user2} %", value=str(p2), disabled=True, key="dlg_p2")
+                splits[user1] = int(amount_cents * p1 / 100)
+                splits[user2] = amount_cents - splits[user1]
+            else:
+                for i, user in enumerate(DEFAULT_USERS):
+                    pct = cols[i].number_input(f"{user} %", min_value=0, max_value=100, value=0, key=f"dlg_pct_{user}")
+                    splits[user] = int(amount_cents * pct / 100)
+
+        elif split_mode == "By amount":
+            cols = st.columns(len(DEFAULT_USERS))
+            if len(DEFAULT_USERS) == 2:
+                user1, user2 = DEFAULT_USERS[0], DEFAULT_USERS[1]
+                a1_str = cols[0].text_input(f"{user1} amount", value="", key="dlg_a1")
+                try:
+                    from expenses_app.store import parse_amount
+                    a1 = parse_amount(a1_str) if a1_str else 0
+                    splits[user1] = a1
+                    a2 = amount_cents - a1
+                    cols[1].text_input(f"{user2} amount", value=f"{a2/100:.2f}", disabled=True, key="dlg_a2")
+                    splits[user2] = a2
+                except Exception:
+                    splits[user1] = 0
+                    splits[user2] = 0
+            else:
+                for i, user in enumerate(DEFAULT_USERS):
+                    amt_str = cols[i].text_input(f"{user} amount", value="", key=f"dlg_amt_{user}")
+                    try:
+                        from expenses_app.store import parse_amount
+                        splits[user] = parse_amount(amt_str) if amt_str else 0
+                    except Exception:
+                        splits[user] = 0
+
+        submitted = st.form_submit_button("Create Expense")
+        cancelled = st.form_submit_button("Cancel", type="secondary")
+
+        if cancelled:
+            close_add_expense_modal()
+
+        if submitted:
+            try:
+                if not amount_input:
+                    raise ValueError("Amount is required")
+                if sum(splits.values()) != amount_cents:
+                    raise ValueError("Split totals must equal amount")
+
+                from expenses_app.store import build_event_store
+                from expenses_app.model import Event
+                from uuid import uuid4
+
+                event = Event.new(
+                    type="EXPENSE_CREATED",
+                    payload={
+                        "expense_id": uuid4().hex,
+                        "amount": amount_cents,
+                        "payer": payer,
+                        "splits": splits,
+                        "category": cat,
+                        "note": note_input,
+                    },
+                )
+                build_event_store().append(event)
+                st.success("Expense created!")
+                close_add_expense_modal()
+                st.experimental_rerun()
+            except Exception as e:
+                st.error(str(e))
+
 
 def render_fab():
-    # Visually styled FAB with a hidden Streamlit button to trigger the dialog
-    # We use a custom attribute data-testid or aria-label to target it
+    ensure_add_expense_state()
     st.markdown("""
-        <div class="fab-container">
-            <button class="fab-button" onclick="const btn = Array.from(parent.document.querySelectorAll('button')).find(el => el.innerText === '+'); if(btn) btn.click();">+</button>
-        </div>
+        <style>
+        button[aria-label="fab_trigger"] {
+            position: fixed !important;
+            bottom: 30px !important;
+            right: 30px !important;
+            width: 60px !important;
+            height: 60px !important;
+            border-radius: 50% !important;
+            background-color: #28a745 !important;
+            color: white !important;
+            font-size: 30px !important;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3) !important;
+            z-index: 999 !important;
+            border: none !important;
+        }
+        button[aria-label="fab_trigger"]:hover {
+            background-color: #218838 !important;
+        }
+        </style>
     """, unsafe_allow_html=True)
-    
-    # This button is hidden by the empty label + collapsed visibility but physically exists for the JS to click
-    if st.button("+", key="fab_trigger", help="Add New Expense"):
-        add_expense_dialog()
+
+    st.button("➕", key="fab_trigger", help="Add New Expense", on_click=open_add_expense_modal)
+    render_add_expense_section()
