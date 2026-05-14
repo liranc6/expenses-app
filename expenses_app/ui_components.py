@@ -205,38 +205,5 @@ def render_add_expense_section():
 
 def render_fab():
     ensure_add_expense_state()
-    st.markdown("""
-        <style>
-        div.stButton:last-of-type button,
-        button[title="Add New Expense"],
-        button[aria-label="Add New Expense"] {
-            position: fixed !important;
-            bottom: 30px !important;
-            right: 30px !important;
-            width: 60px !important;
-            height: 60px !important;
-            border-radius: 50% !important;
-            background-color: #28a745 !important;
-            color: white !important;
-            font-size: 30px !important;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3) !important;
-            z-index: 999 !important;
-            border: none !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-        }
-        div.stButton:last-of-type button:hover,
-        button[title="Add New Expense"]:hover,
-        button[aria-label="Add New Expense"]:hover {
-            background-color: #218838 !important;
-        }
-        div.stButton:last-of-type button {
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.button("➕", key="fab_trigger", help="Add New Expense", on_click=open_add_expense_modal)
+    st.page_link("pages/2_Expenses.py", label="Add New Expense", icon="➕")
     render_add_expense_section()
