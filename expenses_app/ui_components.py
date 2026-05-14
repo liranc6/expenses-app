@@ -104,8 +104,8 @@ def render_add_expense_section():
     st.markdown("### ➕ Add Expense")
     with st.form("add_expense_form"):
         col1, col2 = st.columns(2)
-        amount_input = col1.text_input("Total amount (e.g. 15.50)", key="dlg_amount")
-        note_input = col2.text_input("Note", key="dlg_note")
+        note_input = col1.text_input("Note", key="dlg_note")
+        amount_input = col2.text_input("Total amount (e.g. 15.50)", key="dlg_amount")
 
         cat = st.selectbox("Category", list(CATEGORIES.keys()), format_func=lambda x: f"{CATEGORIES[x]} {x}", key="dlg_cat")
         payer = st.selectbox("Payer", DEFAULT_USERS, key="dlg_payer")
@@ -207,7 +207,7 @@ def render_fab():
     ensure_add_expense_state()
     st.markdown("""
         <style>
-        button[aria-label="fab_trigger"] {
+        button[title="Add New Expense"], button[aria-label="Add New Expense"] {
             position: fixed !important;
             bottom: 30px !important;
             right: 30px !important;
@@ -220,9 +220,16 @@ def render_fab():
             box-shadow: 0 4px 10px rgba(0,0,0,0.3) !important;
             z-index: 999 !important;
             border: none !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
         }
-        button[aria-label="fab_trigger"]:hover {
+        button[title="Add New Expense"], button[aria-label="Add New Expense"]:hover {
             background-color: #218838 !important;
+        }
+        button[title="Add New Expense"], button[aria-label="Add New Expense"] {
+            margin: 0 !important;
+            padding: 0 !important;
         }
         </style>
     """, unsafe_allow_html=True)
