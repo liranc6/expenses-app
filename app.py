@@ -1,3 +1,6 @@
+import importlib.util
+from pathlib import Path
+
 import streamlit as st
 from uuid import uuid4
 from expenses_app.model import Event
@@ -26,6 +29,20 @@ def default_equal_splits(amount_cents: int, users: list, payer: str) -> dict:
     splits = {u: base for u in users}
     splits[payer] += rem
     return splits
+
+PAGES = [
+    {"label": "Home", "path": None, "func": None, "module": None},
+    {"label": "Dashboard", "path": Path(__file__).parent / "pages" / "1_Dashboard.py", "func": "render_dashboard", "module": "page_dashboard"},
+    {"label": "Expenses", "path": Path(__file__).parent / "pages" / "2_Expenses.py", "func": "render_expenses", "module": "page_expenses"},
+    {"label": "Limits", "path": Path(__file__).parent / "pages" / "3_Limits.py", "func": "render_limits", "module": "page_limits"},
+    {"label": "Settlements", "path": Path(__file__).parent / "pages" / "4_Settlements.py", "func": "render_settlements", "module": "page_settlements"},
+]
+
+def load_page_module(page):
+    spec = importlib.util.spec_from_file_location(page["module"], str(page["path"]))
+    page_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(page_module)
+    return page_module
 
 @st.dialog("➕ Add Expense")
 def show_add_expense_modal():
@@ -60,7 +77,7 @@ def show_add_expense_modal():
             st.error(f"Error: {e}")
 
 def main():
-    st.set_page_config(page_title="Expenses App", layout="wide", page_icon="💰")
+    st.set_page_config(page_title="Expenses App", layout="wide", page_icon="💰", initial_sidebar_state="expanded")
     
     st.markdown("""
         <style>
@@ -81,14 +98,26 @@ def main():
     """, unsafe_allow_html=True)
 
     st.sidebar.title("💰 Expenses App")
-    st.sidebar.info("Welcome! Use the navigation menu to switch pages.")
-    
-    if st.button("➕ Quick Add", type="primary", use_container_width=False):
+    page_labels = [page["label"] for page in PAGES]
+    selected_page = st.sidebar.radio("Navigation", page_labels, index=0)
+    st.sidebar.info("Choose a page below or use the quick add button.")
+
+    if st.sidebar.button("➕ Quick Add", type="primary", use_container_width=False):
         show_add_expense_modal()
 
+    if selected_page != "Home":
+        page = next(page for page in PAGES if page["label"] == selected_page)
+        module = load_page_module(page)
+        render_fn = getattr(module, page["func"], None)
+        if callable(render_fn):
+            render_fn()
+        else:
+            st.error("Unable to load the selected page.")
+        return
+
     st.write("### 🚀 Welcome to the Modernized Expenses App")
-    st.write("Select a page below or from the sidebar to begin:")
-    st.info("Use the left sidebar navigation to switch between Dashboard, Expenses, Limits, and Settlements.")
+    st.write("Select a page from the sidebar to begin:")
+    st.info("Use the navigation menu on the left to switch between Dashboard, Expenses, Limits, and Settlements.")
 
     st.markdown("- **1 Dashboard**: Visual summary and budget tracking.")
     st.markdown("- **2 Expenses**: Full history and search.")
