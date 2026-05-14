@@ -1,7 +1,24 @@
-import streamlit as st
+import json
+import os
+from typing import Dict, List, Optional
 from uuid import uuid4
+from decimal import Decimal
+
+from dotenv import load_dotenv
+import plotly.express as px
+import streamlit as st
+
 from expenses_app.model import Event
-from expenses_app.store import build_event_store, parse_amount
+from expenses_app.replay import (
+    compute_balances,
+    derive_expense_state,
+    derive_settlements,
+    sort_events,
+)
+from expenses_app.store import build_event_store, parse_amount, serialize_splits
+
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 DEFAULT_USERS = ["Liran", "Vova"]
 CATEGORIES = {
@@ -12,89 +29,111 @@ CATEGORIES = {
     "Other": "📦",
 }
 
+LIMITS_FILE = os.path.join(os.path.dirname(__file__), "limits.json")
+
+def load_limits():
+    if os.path.exists(LIMITS_FILE):
+        with open(LIMITS_FILE, "r") as f:
+            return json.load(f)
+    return {u: {c: 0 for c in CATEGORIES} for u in DEFAULT_USERS}
+
+def save_limits(limits):
+    with open(LIMITS_FILE, "w") as f:
+        json.dump(limits, f, indent=4)
+
+
+def safe_string(value: Optional[str]) -> str:
+    return (value or "").strip()
+
+
+def split_input_to_text(splits: Dict[str, int]) -> str:
+    return ", ".join(f"{user}:{amount / 100:.2f}" for user, amount in splits.items())
+
+
 def classify_category(note: str) -> str:
     normalized = note.strip().lower()
-    if not normalized: return ""
-    if any(k in normalized for k in ["pizza", "dinner", "food", "restaurant", "coffee", "drink", "market", "supermarket"]): return "Food"
-    if any(k in normalized for k in ["taxi", "uber", "bus", "train", "transport"]): return "Transport"
-    if any(k in normalized for k in ["flight", "hotel", "travel"]): return "Travel"
+    if not normalized:
+        return ""
+    if any(keyword in normalized for keyword in ["pizza", "dinner", "food", "restaurant", "coffee", "drink"]):
+        return "Food"
+    if any(keyword in normalized for keyword in ["taxi", "uber", "bus", "train", "transport"]):
+        return "Transport"
+    if any(keyword in normalized for keyword in ["groceries", "market", "supermarket"]):
+        return "Food"
+    if any(keyword in normalized for keyword in ["flight", "hotel", "travel"]):
+        return "Travel"
     return ""
 
-def default_equal_splits(amount_cents: int, users: list, payer: str) -> dict:
-    base = amount_cents // len(users)
-    rem = amount_cents - base * len(users)
-    splits = {u: base for u in users}
-    splits[payer] += rem
+
+def default_equal_splits(amount_cents: int, users: List[str], payer: str) -> Dict[str, int]:
+    if payer not in users:
+        raise ValueError("Payer must be a valid user")
+    number_of_users = len(users)
+    base_share = amount_cents // number_of_users
+    remainder = amount_cents - base_share * number_of_users
+    splits = {user: base_share for user in users}
+    if remainder:
+        splits[payer] += remainder
     return splits
 
-@st.dialog("➕ Add Expense")
-def show_add_expense_modal():
-    amount_input = st.text_input("Amount (e.g. 15.50)")
-    note_input = st.text_input("Note", placeholder="Lunch, Taxi, etc.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        cat = st.selectbox("Category", list(CATEGORIES.keys()), index=0)
-    with col2:
-        payer = st.selectbox("Payer", DEFAULT_USERS, index=0)
-    
-    if st.button("Save Expense", type="primary", use_container_width=True):
-        try:
-            amt = parse_amount(amount_input)
-            splits = default_equal_splits(amt, DEFAULT_USERS, payer)
-            event = Event.new(
-                type="EXPENSE_CREATED",
-                payload={
-                    "expense_id": uuid4().hex,
-                    "amount": amt,
-                    "payer": payer,
-                    "splits": splits,
-                    "category": cat,
-                    "note": note_input,
-                },
-            )
-            build_event_store().append(event)
-            st.success("Added!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error: {e}")
 
-def main():
+def parse_splits_text(raw: str) -> Dict[str, int]:
+    if not raw.strip():
+        return {}
+    payload = {}
+    for part in raw.split(","):
+        if not part.strip():
+            continue
+        if ":" not in part:
+            raise ValueError("Each split must use the form user:amount")
+        user, value = part.split(":", 1)
+        user = user.strip()
+        payload[user] = parse_amount(value.strip())
+    return payload
+
+
+def format_currency(value: int) -> str:
+    return f"{value / 100:.2f}"
+
+
+def render_limits_page():
+    st.header("⚙️ Limits Configuration")
+    st.write("Set monthly spending limits per category for each user.")
+    
+    limits = load_limits()
+    updated = False
+    
+    for user in DEFAULT_USERS:
+        with st.expander(f"👤 {user} Limits", expanded=True):
+            user_limits = limits.get(user, {c: 0 for c in CATEGORIES})
+            cols = st.columns(len(CATEGORIES))
+            for i, (cat, emoji) in enumerate(CATEGORIES.items()):
+                current_limit_cents = user_limits.get(cat, 0)
+                # Show as float in UI
+                new_limit_val = cols[i].number_input(
+                    f"{emoji} {cat}", 
+                    min_value=0.0, 
+                    value=float(current_limit_cents / 100),
+                    step=10.0,
+                    key=f"limit_{user}_{cat}"
+                )
+                new_limit_cents = int(new_limit_val * 100)
+                if new_limit_cents != current_limit_cents:
+                    user_limits[cat] = new_limit_cents
+                    limits[user] = user_limits
+                    updated = True
+    
+    if updated:
+        if st.button("Save Changes", type="primary"):
+            save_limits(limits)
+            st.success("Limits updated successfully!")
+            st.rerun()
+
+
+def main() -> None:
     st.set_page_config(page_title="Expenses App", layout="wide", page_icon="💰")
     
-    st.markdown("""
-        <style>
-        div.stButton > button[kind="primary"] {
-            background-color: #28a745 !important;
-            border-color: #28a745 !important;
-            color: white !important;
-            position: fixed !important;
-            bottom: 30px !important;
-            right: 30px !important;
-            z-index: 99999 !important;
-            border-radius: 50px !important;
-            width: auto !important;
-            padding: 10px 20px !important;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.sidebar.title("💰 Expenses App")
-    st.sidebar.info("Welcome! Use the navigation menu to switch pages.")
-    
-    if st.button("➕ Quick Add", type="primary", use_container_width=False):
-        show_add_expense_modal()
-
-    st.write("### 🚀 Welcome to the Modernized Expenses App")
-    st.write("Select a page below or from the sidebar to begin:")
-
-    st.page_link("pages/1_Dashboard.py", label="Dashboard", icon="📊")
-    st.page_link("pages/2_Expenses.py", label="Expenses", icon="💸")
-    st.page_link("pages/3_Limits.py", label="Limits", icon="⚖️")
-    st.page_link("pages/4_Settlements.py", label="Settlements", icon="🤝")
+    st.switch_page("pages/1_Dashboard.py")
 
 if __name__ == "__main__":
     main()
-    st.markdown('- **3 Limits**: Configure your budgets.')
-    st.markdown('- **4 Settlements**: Balance your accounts.')
