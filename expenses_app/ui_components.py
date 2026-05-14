@@ -43,6 +43,14 @@ def init_styles():
             background-color: #218838;
         }
         
+        /* Hide the ugly standard Streamlit button we use as a trigger */
+        div[data-testid="stVerticalBlock"] > div:has(button[aria-label="fab-real-trigger"]) {
+            display: none;
+        }
+        .stButton > button[aria-label="fab-real-trigger"] {
+            display: none;
+        }
+
         /* Sidebar Buttons */
         [data-testid="stSidebarNav"] {
             display: none;
@@ -88,27 +96,62 @@ def render_sidebar():
 def add_expense_dialog():
     from expenses_app.store import build_event_store, parse_amount
     from expenses_app.model import Event
+    from expenses_app.replay import default_equal_splits
     from uuid import uuid4
     
-    # Logic from create_expense section in app.py
     col1, col2 = st.columns(2)
-    amount_input = col1.text_input("Total amount", key="dlg_amount")
+    amount_input = col1.text_input("Total amount (e.g. 15.50)", key="dlg_amount")
     note_input = col2.text_input("Note", key="dlg_note")
     
-    cat = st.selectbox("Category", list(CATEGORIES.keys()), format_func=lambda x: f"{CATEGORIES[x]} {x}")
-    payer = st.selectbox("Payer", DEFAULT_USERS)
+    cat = st.selectbox("Category", list(CATEGORIES.keys()), format_func=lambda x: f"{CATEGORIES[x]} {x}", key="dlg_cat")
+    payer = st.selectbox("Payer", DEFAULT_USERS, key="dlg_payer")
     
-    st.write("**Splits** (Equal)")
-    # For simplicity in dialog, default to equal splits for now as basic functionality
+    st.markdown("---")
+    st.write("**Splits**")
+    split_mode = st.radio("Method", ["Equal", "By percentage", "By amount"], horizontal=True, key="dlg_split_mode")
+    
+    splits = {}
+    amount_cents = 0
+    try:
+        if amount_input:
+            amount_cents = parse_amount(amount_input)
+    except:
+        pass
+        
+    if split_mode == "Equal":
+        if amount_cents > 0:
+            splits = default_equal_splits(amount_cents, DEFAULT_USERS, payer)
+            st.caption(f"Equal splits: {amount_cents/200:.2f} each")
+    
+    elif split_mode == "By percentage":
+        cols = st.columns(len(DEFAULT_USERS))
+        if len(DEFAULT_USERS) == 2:
+            user1, user2 = DEFAULT_USERS[0], DEFAULT_USERS[1]
+            p1 = cols[0].number_input(f"{user1} %", min_value=0, max_value=100, value=50, key="dlg_p1")
+            p2 = 100 - p1
+            cols[1].text_input(f"{user2} %", value=str(p2), disabled=True, key="dlg_p2")
+            splits[user1] = int(amount_cents * p1 / 100)
+            splits[user2] = amount_cents - splits[user1]
+        
+    elif split_mode == "By amount":
+        cols = st.columns(len(DEFAULT_USERS))
+        if len(DEFAULT_USERS) == 2:
+            user1, user2 = DEFAULT_USERS[0], DEFAULT_USERS[1]
+            a1_str = cols[0].text_input(f"{user1} amount", value="", key="dlg_a1")
+            try:
+                a1 = parse_amount(a1_str) if a1_str else 0
+                splits[user1] = a1
+                a2 = amount_cents - a1
+                cols[1].text_input(f"{user2} amount", value=f"{a2/100:.2f}", disabled=True, key="dlg_a2")
+                splits[user2] = a2
+            except:
+                splits[user1] = 0
+                splits[user2] = 0
+
     if st.button("Create Expense", type="primary", use_container_width=True):
         try:
-            amount_cents = parse_amount(amount_input)
-            # Simple equal split logic
-            from expenses_app.replay import default_equal_splits
-            splits = {u: amount_cents // len(DEFAULT_USERS) for u in DEFAULT_USERS}
-            # Handle remainder
-            remainder = amount_cents - sum(splits.values())
-            splits[payer] += remainder
+            if not amount_input: raise ValueError("Amount is required")
+            if sum(splits.values()) != amount_cents: raise ValueError("Split totals must equal amount")
             
             event = Event.new(
                 type="EXPENSE_CREATED",
@@ -129,13 +172,22 @@ def add_expense_dialog():
 
 def render_fab():
     # Visually styled FAB with a hidden Streamlit button to trigger the dialog
-    # We use a custom attribute data-testid or aria-label to target it
+    # Robust JS trigger that tries both parent and local document context
     st.markdown("""
         <div class="fab-container">
-            <button class="fab-button" onclick="const btn = Array.from(parent.document.querySelectorAll('button')).find(el => el.innerText === '+'); if(btn) btn.click();">+</button>
+            <button class="fab-button" onclick="
+                const findAndClick = (ctx) => {
+                    const btn = Array.from(ctx.querySelectorAll('button')).find(el => el.innerText === 'hidden_fab_trigger');
+                    if (btn) { btn.click(); return true; }
+                    return false;
+                };
+                if (!findAndClick(document)) {
+                    findAndClick(parent.document);
+                }
+            ">+</button>
         </div>
     """, unsafe_allow_html=True)
     
-    # This button is hidden by the empty label + collapsed visibility but physically exists for the JS to click
-    if st.button("+", key="fab_trigger", help="Add New Expense"):
+    # Text matches the JS query. We'll make it almost invisible or rely on the CSS 'display: none'
+    if st.button("hidden_fab_trigger", key="fab_real_trigger", help="Add New Expense"):
         add_expense_dialog()
