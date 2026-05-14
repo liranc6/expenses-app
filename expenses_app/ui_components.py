@@ -207,7 +207,9 @@ def render_fab():
     ensure_add_expense_state()
     st.markdown("""
         <style>
-        button[title="Add New Expense"], button[aria-label="Add New Expense"] {
+        div.stButton:last-of-type button,
+        button[title="Add New Expense"],
+        button[aria-label="Add New Expense"] {
             position: fixed !important;
             bottom: 30px !important;
             right: 30px !important;
@@ -224,10 +226,12 @@ def render_fab():
             align-items: center !important;
             justify-content: center !important;
         }
-        button[title="Add New Expense"], button[aria-label="Add New Expense"]:hover {
+        div.stButton:last-of-type button:hover,
+        button[title="Add New Expense"]:hover,
+        button[aria-label="Add New Expense"]:hover {
             background-color: #218838 !important;
         }
-        button[title="Add New Expense"], button[aria-label="Add New Expense"] {
+        div.stButton:last-of-type button {
             margin: 0 !important;
             padding: 0 !important;
         }
